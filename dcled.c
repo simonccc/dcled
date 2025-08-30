@@ -29,6 +29,8 @@
 #include <glob.h>
 #include <libusb.h>
 #include <math.h>
+#include <ctype.h>
+#include <string.h>
 
 #define VENDOR 0x1d34
 #define PRODUCT 0x0013
@@ -132,7 +134,6 @@ struct ledfont *allocfont(void);
 struct ledfont *initfont1(struct ledfont *target);
 struct ledfont *initfont2(struct ledfont *target);
 struct ledfont *loadfont(char *filename);
-void savefonts(struct ledfontlist *fontlist);
 void drawtach(struct ledscreen *disp, int load);
 
 int debug = 0;
@@ -834,9 +835,6 @@ void fancytest(struct ledscreen *disp, struct ledfontlist *fontlist) {
 	int origspeed;
 	int tach,load;
 
-	/* in case you want to write out the compiled in fonts. */
-	/* savefonts(fontlist); */
-
 	/* basic test paterns */
 	origspeed=disp->scrolldelay;
 	disp->scrolldelay = 100000;
@@ -1340,49 +1338,6 @@ struct ledfontlist *initfonts(char *dirname) {
 
 	return(head);
 
-}
-
-/* 
- * savefonts() will write out a font in a format that can be read back in.
- * Right now, its converting from the 'compiled in' format into version 0 of
- * the .dlf format.  This function is useful if uou ever want to update the
- * format of dlf files.  use the load function to bring a font in, then call a
- * modified copy of this function to write it out in a new format. I usualy
- * slap it into the fancytest() routine when I need to run it.  -jsj
- */
-void savefonts(struct ledfontlist *fontlist) {
-	struct ledfontlist *flp;
-	struct ledfont *font;
-	FILE *out;
-	char filename[8192];
-	int i;
-	int j;
-
-	for(flp=fontlist;flp;flp=flp->next) {
-		font = flp->font;
-		sprintf(filename,"%s.dlf",font->name);
-		if(!(out=fopen(filename,"w"))) {
-			perror("Ooops...");
-			exit(0);
-		}
-		fprintf(out,"DcledFontVersion: %d\n",font->dataformat);
-		fprintf(out,"Name: %s\n",font->name);
-		fprintf(out,"Description: %s\n",font->description);
-		fprintf(out,"Author: %s\n",font->author);
-		fprintf(out,"Size: %d x %d\n",font->dispwidth,font->dispheight);
-
-		for (i=0;i<256;i++) {
-			fprintf(out,"%02x %c ",i,(isgraph(i)?i:'.'));
-			for (j=0;j<FONTY;j++) {
-				fprintf(out,"%02x ", (unsigned char)font->data[i][j]);
-			}
-			fprintf(out,"\n");
-		}
-		fclose(out);
-	}
-
-	return;
-		
 }
 
 /* given a filename, try and load a font from it.  This probably needs some
