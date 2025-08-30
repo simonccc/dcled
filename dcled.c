@@ -1,10 +1,10 @@
 /* dcled - userland driver for Dream Cheeky (Dream Link?) USB LED Message Board
- * Copyright 2009,2010 Jeff Jahr <malakais@pacbell.net>
- * This is free software.  G'head, use it all you want. 
- * Version 1.0 took ~12 hours to write, and was my first foray into usb
- * device programming.  This is probably not a real good example of how to
- * do ANYTHING.  Sun Jan  4 00:18:41 PST 2009 -jsj
- */
+ * Copyright 2009-2014 Jeff Jahr <malakai@jeffrika.com> */
+
+/* This is free software.  G'head, use it all you want.  Version 1.0 took ~12
+ * hours to write, and was my first foray into usb device programming.  This is
+ * probably not a real good example of how to do ANYTHING.  Sun Jan  4 00:18:41
+ * PST 2009 -jsj */
 
 /* dcled contains contributions from -
  * Andy Scheller 
@@ -25,9 +25,10 @@
 #include <string.h>
 #include <getopt.h>
 #include <time.h>
-#include <hid.h>
 #include <sys/select.h>
 #include <glob.h>
+#include <libusb.h>
+#include <math.h>
 
 #define VENDOR 0x1d34
 #define PRODUCT 0x0013
@@ -75,13 +76,14 @@ struct ledfontlist {
 
 /* This is a basic definition of the led display. 0,0 is the upper left. */
 struct ledscreen {
-	HIDInterface *hid;
+	libusb_device_handle *handle;
 	unsigned char path_in_len;
 	int *path_in;
 	int brightness;
 	int scrolldelay;
 	int scrolldir;
 	int preamble;
+	int tach;
 	time_t lastupdate;
 	int led[LEDSX][LEDSY];
 	struct ledfont *font;
@@ -106,6 +108,15 @@ struct preamble preambles[] = {
 	{ NULL,NULL,NULL }
 };
 
+struct preamble tachs[] = {
+	{ "none"    ,"The default","Jeff Jahr" },
+	{ "tach"    ,"A simple tachometer","Jeff Jahr" },
+	{ "static"  ,"Random dots","Jeff Jahr" },
+	{ "scroll"  ,"Scrolling bar graph","Jeff Jahr" },
+	{ "fireline","Fireline Tach","Jeff Jahr" },
+	{ NULL,NULL,NULL }
+};
+
 
 void clearscreen(int mode,struct ledscreen *disp);
 void scroll(int dir, struct ledscreen *disp);
@@ -122,6 +133,7 @@ struct ledfont *initfont1(struct ledfont *target);
 struct ledfont *initfont2(struct ledfont *target);
 struct ledfont *loadfont(char *filename);
 void savefonts(struct ledfontlist *fontlist);
+void drawtach(struct ledscreen *disp, int load);
 
 int debug = 0;
 int echo = 0;
@@ -160,6 +172,7 @@ void send_screen (struct ledscreen *disp) {
 	char bigpkt[sizeof(struct ledpkt) * 4];
 	struct ledpkt pkt;
 	int row, col, bytep, bitp;
+	static const int HID_SET_REPORT = 0x09;
 
 	if(debug) print_screen(disp);
 	time(&(disp->lastupdate));
@@ -196,7 +209,14 @@ void send_screen (struct ledscreen *disp) {
 		const unsigned int chunk_size = sizeof(bigpkt) / chunk_count;
 		int chunk;
 		for (chunk=0;chunk<chunk_count;chunk++) {
-			hid_set_output_report(disp->hid, disp->path_in, disp->path_in_len, bigpkt+(chunk*chunk_size), chunk_size);
+			libusb_control_transfer(
+				disp->handle,
+				(LIBUSB_RECIPIENT_INTERFACE | LIBUSB_REQUEST_TYPE_CLASS | LIBUSB_ENDPOINT_OUT),
+				HID_SET_REPORT,
+				0, 0,
+				bigpkt+(chunk*chunk_size), chunk_size,
+				1000
+			);
 		}
 	}
 
@@ -226,53 +246,95 @@ void clearscreen(int mode,struct ledscreen *disp) {
 	return;
 }
 
-int open_hiddev(struct ledscreen *disp) {
+int open_usbdev(struct ledscreen *disp) {
 
-	/* Oh my oh my. Need to find the output report descriptor for the device.
-	 * Using the output of 'lsusb -d 1d34:0013 -vvv', one can determin that:
-	 *
-	 * The report descriptor usage page is 65280. The usage we want is #1.
-	 * Why?  Dunno!  Seems to work though.  That usage isnt rooted under any
-	 * items so the path length is 1.
-	 *
-	 * So to make an input path that works with libhid:
-	 *
-	 * ((65280 << 16) + 1) == 0xff000001 */
+	libusb_device **list;
+	libusb_device *device;
+	libusb_device *found = NULL;
+	libusb_device_handle *handle;
+	struct libusb_device_descriptor desc;
 
-	unsigned char const pathlen = 1;
-	const int PATH_IN[] = { 0xff000001 };
-	HIDInterface* hid = NULL;
-	hid_return ret;
+	ssize_t cnt;
+	ssize_t i = 0;
 
-	/* go search for a matching device.  I'm not clear on how this works if
-	 * there is more than one message board installed.  -jsj */
-	HIDInterfaceMatcher leds = { VENDOR, PRODUCT, NULL, NULL, 0 };
-	if ((ret = hid_init()) != HID_RET_SUCCESS) { 
-		fprintf(stderr,"hid_init failed with return code %d\n",ret);
-		return EXIT_FAILURE; 
-	}
-	hid = hid_new_HIDInterface();
-	if (hid == NULL) { 
-		fprintf(stderr,"hid_new_HIDInterface() failed.\n",ret);
-		return EXIT_FAILURE; 
-	}
-	/* This call will forceably remove control of the device from the
-	 * kernel hid driver.  The fourth argument is the number of times the
-	 * call should try to close the device and snag it for our own devious
-	 * purposes before giving up.  It is what was used in the libhid
-	 * example code. */
-	if ((ret=hid_force_open(hid, 0, &leds, 3)) != HID_RET_SUCCESS) { 
-		fprintf(stderr,"hid_force_open failed with return code %d\n",ret);
-		return EXIT_FAILURE;
+	if (libusb_init(NULL)) {
+		return(EXIT_FAILURE);
 	}
 
-	disp->hid = hid;
-	disp->path_in_len = pathlen;
-	disp->path_in = (int*)malloc(pathlen * sizeof(int));
-	memcpy(disp->path_in,PATH_IN,pathlen * sizeof(int));
+	if(debug) {
+		libusb_set_debug(NULL,3);
+	}	
+
+	/* Fetch a list of all the available devices. */
+	cnt = libusb_get_device_list(NULL, &list);
+	if (cnt < 0) {
+		return(EXIT_FAILURE);
+	}
+
+	/* walk the list, looking for our friend. */
+	for (i = 0; i < cnt; i++) {
+		device = list[i];
+		if(libusb_get_device_descriptor(device, &desc)) {
+			return(EXIT_FAILURE);
+		}
+		/* When its time to add support choosing between multiple boards, this
+		 * is where the logic would go.*/
+		if ((desc.idVendor == VENDOR) && 
+			(desc.idProduct == PRODUCT)
+			) {
+			found = device;
+			break;
+		}
+	}
+
+	if (!found) {
+		/* couldnt find the board. */
+		libusb_free_device_list(list, 1);
+		return(EXIT_FAILURE);
+	}
+
+	if(libusb_open(found, &handle)) {
+		/* couldnt get a handle on it... */
+		libusb_free_device_list(list, 1);
+		return(EXIT_FAILURE);
+	}
+
+	/* all done with that list of devices.. */
+	libusb_free_device_list(list, 1);
+
+	disp->handle = handle;
+
+	/* if the kernel hid driver is installed, get rid of it.*/
+	if(libusb_kernel_driver_active(handle,0)) {
+		libusb_detach_kernel_driver(handle,0);
+	}
+
+	/* Go on, take the money and run... */
+	if(libusb_claim_interface(handle,0)) {
+		return(EXIT_FAILURE);
+	}
+
 	return(EXIT_SUCCESS);
 
 }
+
+/* can call this even if no device was ever set up. */
+void close_usbdev(struct ledscreen *disp) {
+	if(!disp){
+		return;
+	}
+	if(!(disp->handle)) {
+		return;
+	}
+
+	libusb_release_interface(disp->handle,0);
+	libusb_close(disp->handle);
+	if(disp) {
+		disp->handle = NULL;
+	}
+	libusb_exit(NULL);
+}
+
 
 
 /* shift the disp one pixel in the given direction.*/
@@ -283,7 +345,25 @@ void scroll(int dir, struct ledscreen *disp) {
 
 	switch (dir) {
 		case 0: /* north - up */
+			for(x=0;x<LEDSX;x++) {
+				for(y=0;y<LEDSY-1;y++) {
+					disp->led[x][y] = disp->led[x][y+1];
+				}
+			}
+			for(x=0;x<LEDSX;x++) {
+				disp->led[x][LEDSY-1] = 0;
+			}
+			break;
 		case 1: /* east - right */
+			for(x=LEDSX-1;x>0;x--) {
+				for(y=0;y<LEDSY;y++) {
+					disp->led[x][y] = disp->led[x-1][y];
+				}
+			}
+			for(y=0;y<LEDSY;y++) {
+				disp->led[0][y] = 0;
+			}
+			break;
 		case 2: /* south - down */
 		case 3: /* west - left */
 		default:
@@ -305,7 +385,7 @@ void scroll(int dir, struct ledscreen *disp) {
  * starting at xloc.  */
 void printchar(struct ledscreen *disp, char c, int xloc) {
 
-	int cx,cy,x,y;
+	int cx,x,y;
 	char *f;
 
 	f=(char*)disp->font->data;
@@ -351,8 +431,7 @@ void bcdclock(struct ledscreen *disp, int forever) {
 	time_t firsttime;
 	struct tm* timeinfo;
 	char strtime[11];
-	int x,y;
-	int digit;
+	int x;
 	char *p;
 
 	time(&firsttime);
@@ -504,7 +583,7 @@ void testpatern (int which, struct ledscreen *disp) {
 /* scrolls random data.  kinda cool, used during development. */
 void scrolltest(struct ledscreen *disp) {
 
-	int x,y;
+	int y;
 	clearscreen(0,disp);
 
 	while(1) {
@@ -521,8 +600,6 @@ void scrolltest(struct ledscreen *disp) {
 
 /* call the right graphic header depending on style and direction. */
 void scrollpreamble(int isend, struct ledscreen *disp) {
-
-	int miltime=0;
 
 	switch (disp->preamble) {
 		case 7: 
@@ -599,7 +676,7 @@ void staticwarmup(struct ledscreen *disp, int isend, int width) {
 /* A random banner */
 void scrollrndfade(struct ledscreen *disp, int isend, int width) {
 
-	int x,y;
+	int y;
 	int odds;
 
 	if (!isend) {
@@ -755,9 +832,14 @@ void fancytest(struct ledscreen *disp, struct ledfontlist *fontlist) {
 	struct ledfontlist *flp;
 	struct ledfont *origfont;
 	int origspeed;
+	int tach,load;
 
 	/* in case you want to write out the compiled in fonts. */
 	/* savefonts(fontlist); */
+
+	/* basic test paterns */
+	origspeed=disp->scrolldelay;
+	disp->scrolldelay = 100000;
 
 	for (count=0;count<1;count++){
 		for (tp=1;tp<=MAXTESTPAT;tp++) {
@@ -771,10 +853,10 @@ void fancytest(struct ledscreen *disp, struct ledfontlist *fontlist) {
 		}
 	}
 	testpatern(0,disp);
+	disp->scrolldelay = origspeed;
 
 	/* now demo all of the preambles. */
 	preamble = 1;
-	disp->scrolldelay = 10000;
 
 	origspeed=disp->scrolldelay;
 	disp->scrolldelay = origspeed * 4;
@@ -795,6 +877,43 @@ void fancytest(struct ledscreen *disp, struct ledfontlist *fontlist) {
 		preamble++;
 	}
 
+	/* demo the tachs */
+	tach = 1;
+
+	origspeed=disp->scrolldelay;
+	disp->scrolldelay = origspeed * 4;
+	scrollmsg(disp,"    Tachometers   \n");
+	disp->scrolldelay = origspeed;
+
+	while ( tachs[tach].name != NULL) {
+
+		for(load=0;load<=100;load+=10) {
+			disp->tach=tach;
+			drawtach(disp,load);
+			usleep(250000);
+		}
+
+		for(load=100;load>0;load-=11) {
+			disp->tach=tach;
+			drawtach(disp,load);
+			usleep(250000);
+		}
+
+		clearscreen(1, disp);
+
+		snprintf(msg,8192,"%s - %-10s <%s>",
+			tachs[tach].name,
+			tachs[tach].description,
+			tachs[tach].author
+		);
+		scrollmsg(disp,msg);
+		clearscreen(1, disp);
+
+		tach++;
+	}
+
+
+	/* demo the fonts. */
 	disp->preamble = 0;
 	origfont = disp->font;
 
@@ -813,11 +932,12 @@ void fancytest(struct ledscreen *disp, struct ledfontlist *fontlist) {
 		scrollmsg(disp,msg);
 	}
 
+	clearscreen(1, disp);
 	disp->preamble = 0;
 	disp->font = origfont;
 	disp->scrolldelay = 10000;
 	disp->brightness = 0;
-	sprintf(msg,"*** dcled %s Copyright 2011 Jeff Jahr <malakais@pacbell.net> ***     ",version);
+	sprintf(msg,"*** dcled %s Copyright 2014 Jeff Jahr <malakai@jeffrika.com> ***     ",version);
 	scrollmsg(disp,msg);
 }
 
@@ -863,15 +983,13 @@ void keep_lit(struct ledscreen *disp) {
 
 /* Jump to the end of the message and print just the chars that will fit on the
  * screen without scrolling.  Contributed by Robert Flick */
-void printmsg(struct ledscreen *disp, char* msg) {
+void printmsg_raw(struct ledscreen *disp, char* msg) {
 
 	char* p = msg;
 	int i = 0;
 	int numchars, start;
 	/* set pack to 0 if you want space between letters and only four chars per display. */
 	int pack = 1;
-
-	clearscreen(0, disp);
 
 	numchars = LEDSX / ((disp->font->dispwidth)-pack);
 
@@ -898,26 +1016,168 @@ void printmsg(struct ledscreen *disp, char* msg) {
 		i++;
 	}
 
-	/* take care of echoing */
-	p=msg;
-	if(echo){
-		while(*p != '\0') {
-			fputc(*p++,stdout);
-		}
-		fflush(stdout);
-	}
+}
+
+
+void printmsg(struct ledscreen *disp, char* msg) {
+
+	clearscreen(0, disp);
+	printmsg_raw(disp,msg);
 	send_screen(disp);
 	/* line print speed can be controlled with the --speed parameter */
 	usleep(disp->scrolldelay);
 }
 
+/* more static when closer to 100% */
+void statictach(struct ledscreen *disp, int load) {
+
+	int x, y;
+	float scale;
+
+	clearscreen(0, disp);
+
+	/* set the overall brightnetss. */
+	disp->brightness = 0;
+	if(load>33) {
+		disp->brightness = 1;
+	}
+	if(load>66) {
+		disp->brightness = 2;
+	}
+
+	scale = (float)load/100;
+
+	for (x=0;x<LEDSX;x++) {
+		for (y=0;y<LEDSY;y++) {
+			disp->led[x][y] ^= ((load/100.0) > rand()/(((double)RAND_MAX + 1)))?1:0;
+		}
+	}
+
+	send_screen(disp);
+}
+
+int sqrtscale(float load,int width) {
+	width -=1;
+	return(round(sqrt(load)*10.0 / 100.0 * width));
+}
+
+/* Graph looks like a wildfire spreading. */
+void firelinetach(struct ledscreen *disp, int load) {
+
+	int x, y;
+	float scale,burnrate;
+	int left, right;
+
+	load = sqrt(load) * 10;
+
+	/* scroll the whole display up one. */
+	scroll(0,disp);
+	burnrate = rand()/((double)RAND_MAX + 1);
+	if(burnrate<0.25) {
+		scroll(1,disp);
+	} else if(burnrate>0.9) {
+		scroll(3,disp);
+	}
+
+	/* extingquish some existing embers. */
+	for (x=0;x<LEDSX;x++) {
+		for (y=0;y<LEDSY;y++) {
+			burnrate = rand()/((double)RAND_MAX + 1);
+			scale = (float)x/LEDSX;
+			if(scale < burnrate*burnrate ) {
+				disp->led[x][y] = 0;
+			}
+		}
+	}
+
+	scale = (float)load/100;
+	left = 0;
+	right = round(LEDSX * scale);
+
+	scale = (float)load/100;
+
+	/* draw a new line of fire. */
+	for (x=left;x<right;x++) {
+		disp->led[x][LEDSY-1] = 1;
+	}
+
+	send_screen(disp);
+}
+
+/* Left to right bar with overlay of percentage. */
+void simpletach(struct ledscreen *disp, int load) {
+
+	char msg[80];
+	int x,y;
+
+	clearscreen(0, disp);
+
+	/* set the overall brightnetss. */
+	disp->brightness = 0;
+	if(load>33) {
+		disp->brightness = 1;
+	}
+	if(load>66) {
+		disp->brightness = 2;
+	}
+
+	/* print the percentage. */
+	sprintf(msg,"%4d%%",load);
+	printmsg_raw(disp,msg);
+
+	/* xor the bar onto the screen */
+	for(x=0;x< (float)(load/100.0) * LEDSX;x++) {
+		for(y=0;y<LEDSY;y++) {
+			disp->led[x][y] ^= 1;
+		}
+	}
+	send_screen(disp);
+	return;
+}
+
+/* simple scrolling bar graph tach */
+void scrolltach(struct ledscreen *disp, int load) {
+	
+	int y;
+	int height;
+
+	scroll(3,disp);
+
+	height = (round((float)load/100.0 * LEDSY));
+	for(y=0;y<height;y++) {
+		disp->led[LEDSX-1][LEDSY-1-y] ^= 1;
+	}
+	send_screen(disp);
+}
+
+	
+/* Update one frame of tachometer based on the tach variable stored in the
+ * display. */
+void drawtach(struct ledscreen *disp, int load) {
+	
+	switch (disp->tach) {
+		case 4: 
+			firelinetach(disp,load);
+			return;
+		case 3: 
+			scrolltach(disp,load);
+			return;
+		case 2: 
+			statictach(disp,load);
+			return;
+		case 1:
+		case 0:
+		default:
+			simpletach(disp,load);
+			return;
+	}
+}
 
 
 /* Same thing, bigger scope.  Scroll a whole file. */
 void scrollfile(struct ledscreen *disp, FILE* cin) {
 
 	char buf[8192];
-	char *nl;
 	time_t now;
 	time_t temptime;
 	fd_set inset;
@@ -933,9 +1193,7 @@ void scrollfile(struct ledscreen *disp, FILE* cin) {
 
 		select(fileno(cin)+1,&inset,NULL,NULL,&timeout);
 
-		/* does not work well on stdin/tail -f */
-		/* if ( ! FD_ISSET(fileno(cin),&inset) ) { */
-		if ( (! FD_ISSET(fileno(cin),&inset)) &&  (cin != stdin)) {
+		if ( ! FD_ISSET(fileno(cin),&inset) ) {
 			if (repeat) {
 				/* send_screen twiddles the last update time. just undo it.*/
 				temptime = disp->lastupdate;
@@ -959,6 +1217,56 @@ void scrollfile(struct ledscreen *disp, FILE* cin) {
 				return;
 			}
 		}
+	}
+
+}
+
+/* read stdin for a number between 0-100.  Draw it as a percentage on a
+ * tachometer gague.  Could use this for monitoring CPU utilization, task
+ * completion, engine RPM's, whatever.  */
+void tachfile(struct ledscreen *disp, FILE* cin) {
+
+	char buf[8192];
+	fd_set inset;
+	struct timeval timeout;
+	int load=0;
+
+	while(1) {
+		FD_ZERO(&inset);
+		FD_SET(fileno(cin),&inset);
+
+		/* How long to wait for IO before coming back to refresh the display. */
+		timeout.tv_sec = 0;
+		timeout.tv_usec = 250000; 
+
+		select(fileno(cin)+1,&inset,NULL,NULL,&timeout);
+
+		if ( FD_ISSET(fileno(cin),&inset) ) {
+			if(fgets(buf,8192,cin)) {
+
+				if(sscanf(buf,"%d",&load)!=1) {
+					if(debug) {
+						fprintf(stderr,"Couldn't find an integer between 0-100\n");
+						fprintf(stderr,"saw: %s\n",buf);
+					}
+				} 
+				load = (load>100)?100:load;
+				load = (load<0)?0:load;
+
+				if(echo){
+					fputs(buf,stdout);
+					fflush(stdout);
+				}
+
+			} else {
+				/* end of file. */
+				return;
+			}
+			if(!fastprint) {
+				usleep(disp->scrolldelay);
+			}
+		}
+		drawtach(disp,load);
 	}
 
 }
@@ -988,13 +1296,7 @@ struct ledfont *allocfont(void) {
 
 /* called via atexit. */
 void bye(void) {
-/* if I wanted to clean it up right, this is what I'd do.*/
-/*	if(hid) {
-		hid_close(hid);
-		hid_delete_HIDInterface(&hid);
-		hid_cleanup();
-	}
-*/
+	/* if I wanted to clean it up right, this is where I'd do it.*/
 }
 
 struct ledfontlist *initfonts(char *dirname) {
@@ -1020,7 +1322,7 @@ struct ledfontlist *initfonts(char *dirname) {
 	if ( dirname ) {
 		sprintf(filepat,"%s/*.dlf",dirname);
 	} else {
-		sprintf(filepat,"*.dlf",dirname);
+		sprintf(filepat,"*.dlf");
 	}
 
 	if (glob(filepat,0,NULL,&globbuf) != 0) {
@@ -1090,7 +1392,7 @@ struct ledfont *loadfont(char *filename) {
 	FILE *in;
 	struct ledfont *font;
 	char buf[8192];
-	int i,j;
+	int i;
 	char junk;
 	char row[FONTY];
 	int scancount = 0;
@@ -1162,7 +1464,6 @@ struct ledfont *loadfont(char *filename) {
 /* yah, its main allright. */
 int main (int argc, char **argv) {
 
-	int x, y, b, tp;
 	struct ledscreen maindisp;
 	struct ledscreen *disp;
 	int getoptc, option_index = 0;
@@ -1172,7 +1473,6 @@ int main (int argc, char **argv) {
 	int test=0;
 	int fileidx=0;
 	FILE *cin;
-	int devno;
 	int preamble=0;
 	int dfont=0;
 	int clock=0;
@@ -1180,6 +1480,7 @@ int main (int argc, char **argv) {
 	char *fontname = NULL;
 	int printhelp = 0;
 	int pickfont = 0;
+	int tach=0;
 	
 	struct ledfontlist *fontlist;
 	struct ledfontlist *flp;
@@ -1196,6 +1497,7 @@ int main (int argc, char **argv) {
 		{ "repeat",	no_argument,	0, 'r' },
 		{ "fastprint",	no_argument,	0, 'f' },
 		{ "speed",	optional_argument,	0, 's' },
+		{ "tach",	optional_argument,	0, 'T' },
 		{ "preamble",	optional_argument,	0, 'p' },
 		{ "font",	optional_argument,	0, 'g' },
 		{ "fontdir",	optional_argument,	0, 'G' },
@@ -1206,7 +1508,7 @@ int main (int argc, char **argv) {
 	atexit(bye);
 
 	while (1) {
-		getoptc = getopt_long (argc, argv, "ho:m:b:s:p:g:G:dtrfencCB", 
+		getoptc = getopt_long (argc, argv, "ho:m:b:s:T:p:g:G:dtrfencCB", 
 			long_options, &option_index
 		);
 
@@ -1250,6 +1552,25 @@ int main (int argc, char **argv) {
 						if(preambles[preamble].name == NULL ) {
 							fprintf(stdout,"Unknown preamble.  Try -h for the list. \n");
 							preamble=0;
+						}
+					}
+				}
+				break;
+			case 'T':
+				if (optarg != NULL) {
+					tach = atoi(optarg);
+					if (tach <= 0 ) {
+						tach = 1;
+						/* look for a match by name */
+						while ( tachs[tach].name != NULL) {
+							if (!strcmp(optarg,tachs[tach].name)) {
+								break;
+							}
+							tach++;
+						}
+						if(tachs[tach].name == NULL ) {
+							fprintf(stdout,"Unknown tach.  Try -h for the list. \n");
+							tach=0;
 						}
 					}
 				}
@@ -1316,6 +1637,7 @@ int main (int argc, char **argv) {
 		fprintf(stdout,"\t--repeat      -r   Keep scrolling forever\n");
 		fprintf(stdout,"\t--fastprint   -f   Jump to end of message.\n");
 		fprintf(stdout,"\t--speed       -s   General delay in ms\n");
+		fprintf(stdout,"\t--tach        -T   Display a tachometer\n");
 		fprintf(stdout,"\t--test        -t   Output a test pattern\n");
 		fprintf(stdout,"\t--font        -g   Select a font\n");
 		fprintf(stdout,"\t--fontdir     -G   Select a font directory\n");
@@ -1327,6 +1649,18 @@ int main (int argc, char **argv) {
 				preamble,
 				preambles[preamble].name,
 				preambles[preamble].description
+			);
+			preamble++;
+		}
+		fprintf(stdout,"\n");
+
+		fprintf(stdout,"Available tachometer displays:\n\n");
+		preamble = 1;
+		while ( tachs[preamble].name != NULL) {
+			fprintf(stdout,"\t%2d - %-10s - %s\n",
+				preamble,
+				tachs[preamble].name,
+				tachs[preamble].description
 			);
 			preamble++;
 		}
@@ -1349,6 +1683,7 @@ int main (int argc, char **argv) {
 	disp->scrolldelay = speed;
 	disp->scrolldir = 3;
 	disp->preamble = preamble;
+	disp->tach = tach;
 
 	/* the first font in the list is the default. */
 	disp->font = fontlist->font;
@@ -1386,7 +1721,7 @@ int main (int argc, char **argv) {
 	srand(getpid());
 
 	if (!nodev) {
-		if(open_hiddev(disp)==EXIT_FAILURE) {
+		if(open_usbdev(disp)==EXIT_FAILURE) {
 			fprintf(stderr,"Couldn't find the device.  Was expecting to find a readable\ndevice that matched vendor %0x and product %0x.  Is the\ndevice plugged in? Do you have permission?\n",VENDOR,PRODUCT);
 			return(EXIT_FAILURE);
 		}
@@ -1401,13 +1736,15 @@ int main (int argc, char **argv) {
 		fprintf(stdout,"brightness is %d\n",brightness);
 		fprintf(stdout,"debug is %d\n",debug);
 		fprintf(stdout,"font directory is %s\n",FONTDIR);
-		disp->scrolldelay = 100000;
+		disp->scrolldelay = 10000;
 		fancytest(disp,fontlist);
+		close_usbdev(disp);
 		exit(0);
 	}
 
 	if(clock) {
 		clockmode(disp,clock,repeat);
+		close_usbdev(disp);
 		exit(0);
 	}
 
@@ -1422,6 +1759,7 @@ int main (int argc, char **argv) {
 			}
 			scrollpreamble(1,disp);
 		} while (repeat);
+		close_usbdev(disp);
 		exit(0);
 	}
 
@@ -1434,22 +1772,33 @@ int main (int argc, char **argv) {
 					fprintf(stderr,"Couldnt open %s: %s\n", 
 						argv[fileidx], strerror(errno)
 					);
+					close_usbdev(disp);
 					exit(0);
 				}
 				scrollpreamble(0,disp);
-				scrollfile(disp,cin);
+				if(tach) {
+					tachfile(disp,cin);
+				} else {
+					scrollfile(disp,cin);
+				}
 				scrollpreamble(1,disp);
 				fclose(cin);
 				fileidx++;
 			}
 		} while (repeat);
+		close_usbdev(disp);
 		exit(0);
 	}
 
 	/* read from stdin. */
 	scrollpreamble(0,disp);
-	scrollfile(disp,stdin);
+	if(tach) {
+		tachfile(disp,stdin);
+	} else {
+		scrollfile(disp,stdin);
+	}
 	scrollpreamble(1,disp);
+	close_usbdev(disp);
 
 }
 
