@@ -1,7 +1,6 @@
 name: release
 
 on: 
-  workflow_dispatch:
   push:
     tags:
     - 'release'
@@ -23,6 +22,5 @@ jobs:
         makeLatest: true
         artifacts: "dcled"
         bodyFile: "RLS.md"
-        tag: "ghaction_rls"
         name: "latest binary"
 
