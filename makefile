@@ -41,7 +41,7 @@ ctags: $(HFILES) $(CFILES)
 
 # remove the object files
 clean:	
-	rm -i $(OFILES) dcled
+	rm $(OFILES) dcled cpuload
 
 # copy stuff into the install directory
 install:
@@ -49,14 +49,10 @@ install:
 	cp fonts/*.dlf $(FONTDIR)
 	mkdir -p $(INSTALLDIR)
 	cp dcled $(INSTALLDIR)
-	#
-	# Now run 'make udev' if you want to install the device permissions.
-	#
 
 udev:
 	cp 40-dcled.rules /lib/udev/rules.d
 	service udev restart
-	# Done!
 
 dist:
 	mkdir ${DIST}
