@@ -41,11 +41,6 @@
 #define FONTY 7
 #define MAXTESTPAT 8
 
-/* if it isn't defined in the make file... */
-#ifndef FONTDIR
-#define FONTDIR "."
-#endif
-
 #ifndef DCLEDVERSION
 #define DCLEDVERSION "0.0"
 #endif
@@ -131,7 +126,7 @@ void printtime(struct ledscreen *disp,int mode);
 void spiral(struct ledscreen *disp);
 void fire(struct ledscreen *disp, int isend);
 struct ledfont *allocfont(void);
-struct ledfont *initfont1(struct ledfont *target);
+struct ledfont *initfont(struct ledfont *target);
 struct ledfont *loadfont(char *filename);
 void drawtach(struct ledscreen *disp, int load);
 
@@ -1278,40 +1273,16 @@ void bye(void) {
 	/* if I wanted to clean it up right, this is where I'd do it.*/
 }
 
-struct ledfontlist *initfonts(char *dirname) {
+struct ledfontlist *initfonts() {
 
 	struct ledfontlist *head;
 	struct ledfontlist *p;
-	struct ledfont *f;
-	int i;
-	glob_t globbuf;
-	char filepat[8192];
 
 	/* the original default 5x7 font. */
 	p = head = malloc(sizeof(struct ledfontlist));
-	p->font = initfont1(allocfont());
+	p->font = initfont(allocfont());
 	p->next =  malloc(sizeof(struct ledfontlist));
 	p->next = NULL;
-
-	/* search for any offboard fonts to add to the list. */
-	if ( dirname ) {
-		sprintf(filepat,"%s/*.dlf",dirname);
-	} else {
-		sprintf(filepat,"*.dlf");
-	}
-
-	if (glob(filepat,0,NULL,&globbuf) != 0) {
-		return(head);
-	}
-
-	for(i=0;i<globbuf.gl_pathc;i++) {
-		if( f = loadfont(globbuf.gl_pathv[i]) ) {
-			p->next =  malloc(sizeof(struct ledfontlist));
-			p = p->next;
-			p->font = f;
-			p->next = NULL;
-		}
-	}
 
 	return(head);
 
@@ -1408,7 +1379,6 @@ int main (int argc, char **argv) {
 	int preamble=0;
 	int dfont=0;
 	int clock=0;
-	char *fontdir = FONTDIR;
 	char *fontname = NULL;
 	int printhelp = 0;
 	int pickfont = 0;
@@ -1507,9 +1477,6 @@ int main (int argc, char **argv) {
 					}
 				}
 				break;
-			case 'G':
-				fontdir = strdup(optarg);
-				break;
 			case 'g':
 				fontname = strdup(optarg);
 				pickfont = 1;
@@ -1550,7 +1517,7 @@ int main (int argc, char **argv) {
 	}
 
 	/* init the builtin fonts */
-	fontlist = initfonts(fontdir);
+	fontlist = initfonts();
 
 	if(printhelp) {
 		/* bah getopt sucks.  Why do i have to format this?*/
@@ -1568,11 +1535,10 @@ int main (int argc, char **argv) {
 		fprintf(stdout,"\t--preamble    -p   Send a graphic before the text.\n");
 		fprintf(stdout,"\t--repeat      -r   Keep scrolling forever\n");
 		fprintf(stdout,"\t--fastprint   -f   Jump to end of message.\n");
-		fprintf(stdout,"\t--speed       -s   General delay in ms\n");
+		fprintf(stdout,"\t--speed       -s   Delay in ms\n");
 		fprintf(stdout,"\t--tach        -T   Display a tachometer\n");
 		fprintf(stdout,"\t--test        -t   Output a test pattern\n");
 		fprintf(stdout,"\t--font        -g   Select a font\n");
-		fprintf(stdout,"\t--fontdir     -G   Select a font directory\n");
 		fprintf(stdout,"\n");
 		fprintf(stdout,"Available preamble graphics:\n\n");
 		preamble = 1;
@@ -1667,7 +1633,6 @@ int main (int argc, char **argv) {
 		fprintf(stdout,"Version is %s\n",version);
 		fprintf(stdout,"brightness is %d\n",brightness);
 		fprintf(stdout,"debug is %d\n",debug);
-		fprintf(stdout,"font directory is %s\n",FONTDIR);
 		disp->scrolldelay = 10000;
 		fancytest(disp,fontlist);
 		close_usbdev(disp);
@@ -1738,7 +1703,7 @@ int main (int argc, char **argv) {
   Copy a font definition into a character pointer.  In this application, fonts
   are 256x7 bytes.  256 one byte chars by 7 font rows.
 */
-struct ledfont *initfont1(struct ledfont *target) {
+struct ledfont *initfont(struct ledfont *target) {
 
 	static char font[256][FONTY] = {
 		{ 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA },

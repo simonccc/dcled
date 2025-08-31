@@ -3,7 +3,6 @@
 
 # INSTALLDIR is where the binaries get installed
 INSTALLDIR=/usr/local/bin
-FONTDIR="/usr/local/share/dcled"
 DCLEDVERSION="2.2"
 DIST=dcled-$(DCLEDVERSION)
 LIBUSB_CFLAGS=-I/usr/include/libusb-1.0
@@ -13,7 +12,7 @@ LIBUSB_LIBS=-lusb-1.0
  
 CC=gcc
 
-CFLAGS= -g -O3 -Wunused-variable -DFONTDIR='$(FONTDIR)' -DDCLEDVERSION='$(DCLEDVERSION)' ${LIBUSB_CFLAGS}
+CFLAGS= -g -O3 -Wunused-variable -DDCLEDVERSION='$(DCLEDVERSION)' ${LIBUSB_CFLAGS}
 LDFLAGS= -g -lm ${LIBUSB_LIBS}
  
 # You probaby dont need to change anything below this line...
@@ -38,8 +37,6 @@ clean:
 
 # copy stuff into the install directory
 install:
-	mkdir -p $(FONTDIR)
-	cp fonts/*.dlf $(FONTDIR)
 	mkdir -p $(INSTALLDIR)
 	cp dcled $(INSTALLDIR)
 
