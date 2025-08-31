@@ -127,7 +127,6 @@ void spiral(struct ledscreen *disp);
 void fire(struct ledscreen *disp, int isend);
 struct ledfont *allocfont(void);
 struct ledfont *initfont(struct ledfont *target);
-struct ledfont *loadfont(char *filename);
 void drawtach(struct ledscreen *disp, int load);
 
 int debug = 0;
@@ -1288,81 +1287,6 @@ struct ledfontlist *initfonts() {
 
 }
 
-/* given a filename, try and load a font from it.  This probably needs some
- * improvement. -jsj */
-struct ledfont *loadfont(char *filename) {
-
-	FILE *in;
-	struct ledfont *font;
-	char buf[8192];
-	int i;
-	char junk;
-	char row[FONTY];
-	int scancount = 0;
-	char *s;
-
-	if(!(in=fopen(filename,"r"))) {
-		perror(filename);
-	}
-
-	font = allocfont();
-
-	if ( (fscanf(in,"DcledFontVersion: %d\n",&(font->dataformat)) != 1) || (font->dataformat !=0)) {
-		/* its nothing we understand. */
-		return(NULL);
-	}
-
-	/* lame.  the fields have tags, so they ought to be able to appear in the
-	 * file in any order, but I'm doing it this way because I'm in a hurry.  */
-
-	if(fgets(buf,sizeof(buf),in)) {
-		if (s = strchr(buf,'\n')) *s = '\0';
-		if (s = strchr(buf,' ')) {
-			font->name = strdup(s+1);
-		} else {
-			return(NULL);
-		}
-	}
-
-	if(fgets(buf,sizeof(buf),in)) {
-		if (s = strchr(buf,'\n')) *s = '\0';
-		if (s = strchr(buf,' ')) {
-			font->description = strdup(s+1);
-		} else {
-			return(NULL);
-		}
-	}
-
-	if(fgets(buf,sizeof(buf),in)) {
-		if (s = strchr(buf,'\n')) *s = '\0';
-		if (s = strchr(buf,' ')) {
-			font->author = strdup(s+1);
-		} else {
-			return(NULL);
-		}
-	}
-
-	scancount += fscanf(in,"Size: %d x %d\n",&(font->dispwidth),&(font->dispheight));
-
-	while(fgets(buf,sizeof(buf),in)) {
-		sscanf(buf,"%02x %c %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx %02hhx",
-			&i,&junk,
-			&row[0], &row[1], &row[2], &row[3], &row[4], &row[5], &row[6]
-		);
-		font->data[i][0] = row[0];
-		font->data[i][1] = row[1];
-		font->data[i][2] = row[2];
-		font->data[i][3] = row[3];
-		font->data[i][4] = row[4];
-		font->data[i][5] = row[5];
-		font->data[i][6] = row[6];
-	};
-
-	fclose(in);
-	return(font);
-
-}
-
 
 /* yah, its main allright. */
 int main (int argc, char **argv) {
@@ -1402,7 +1326,6 @@ int main (int argc, char **argv) {
 		{ "tach",	optional_argument,	0, 'T' },
 		{ "preamble",	optional_argument,	0, 'p' },
 		{ "font",	optional_argument,	0, 'g' },
-		{ "fontdir",	optional_argument,	0, 'G' },
 		{ "test",	no_argument,	0, 't' },
 		{ 0,0,0,0 }
 	};
