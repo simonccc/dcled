@@ -2,7 +2,7 @@
 # Jeff Jahr <malakai@jeffrika.com> -jsj 
 
 # What goes into the archive?
-DISTFILES= dcled.c cpuload.c makefile README README-MACOS 40-dcled.rules
+DISTFILES= dcled.c cpuload.c makefile README README-MACOS
 
 # INSTALLDIR is where the binaries get installed
 INSTALLDIR=/usr/local/bin
@@ -51,7 +51,6 @@ install:
 	cp dcled $(INSTALLDIR)
 
 udev:
-	cp 40-dcled.rules /lib/udev/rules.d
 	service udev restart
 
 dist:
