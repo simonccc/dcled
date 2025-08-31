@@ -1,9 +1,13 @@
-dcled - userland driver for Dream Cheeky (Dream Link?) USB LED Message Board
-Copyright 2009-2014 Jeff Jahr <malakai@jeffrika.com> 
+# dcled 
+*Copyright 2009-2014 Jeff Jahr <malakai@jeffrika.com>*
 
-This is a cut down version for my own usage feel free to enjoy! 
+dcled is a utiliy to operate a USB message board / ticker type device. 
 
-BUILDING IT:
+This is a cut down version of the original code with maybe some refinements in the future. 
+
+Please check the [docs] for the original info 
+
+## BUILDING IT:
 
 If you are running
 debian or ubuntu, try running 'apt-get install libusb-1.0-0-dev' to get the
@@ -14,7 +18,7 @@ work, try compling it by hand.  There is an install option in the makefile.  If
 the first make command was successful, run 'make install' as root to copy the
 executable into /usr/local/bin.
 
-RUNNING IT:
+## RUNNING IT:
 
 You are going to need read/write access to the mesage board device in order to
 use dcled.  This means you can either run dcled as root, suid the exe, or
@@ -50,37 +54,30 @@ Available preamble graphics:
          8 - bcdclock   - Shows the time in binary
 
 
-EXAMPLES:
+## EXAMPLES:
 
+```
 Run a test pattern:
 dcled -t  
 
 Hello World:
-dcled -m 'Hello World!'
+# dcled -m 'Hello World!'
 
-Hello World part 2:
-echo 'Hello World!' | dcled
+Or via stdin 
+#cecho 'Hello World!' | dcled
 
-Hell World part 3:
-echo Hello >f1
-echo Hello >f2
-dcled f1 f2
 
-If you want to have dcled run as a clock all the time, try adding using the clock and repeat options.
+run a clock
+# dcled --clock --repeat
 
-dcled --clock --repeat
-
-dcled -p static -m "Hello World"
-dcled -p 2 -m "Hello World"
-
-To see a demo of all the preamble types, run the test pattern:
-
-dcled --test
+preambles 
+# dcled -p static -m "Hello World"
+# dcled -p 2 -m "Hello World"
 
 Here is how I use it to monitor my game server syslog file:
 
-tail -f syslog | dcled -e -p static
-
-CREDITS:
+# tail -f syslog | dcled -e -p static
+```
+## CREDITS:
 
 Please see original README files in the docs directory
