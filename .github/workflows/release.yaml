@@ -20,6 +20,6 @@ jobs:
     - uses: ncipollo/release-action@v1
       with:
         artifacts: "dcled cpuload"
-        bodyFile: "Readme.md"
+        bodyFile: "README.md"
         tag: "ghaction_rls"
 
