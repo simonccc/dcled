@@ -22,7 +22,7 @@ jobs:
         allowUpdates: true
         makeLatest: true
         artifacts: "dcled"
-        bodyFile: "README.md"
+        bodyFile: "RLS.md"
         tag: "ghaction_rls"
-        name: "latest"
+        name: "latest binary"
 
