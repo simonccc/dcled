@@ -15,7 +15,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - run: |
-          apt-get install libusb-1.0-0-dev 
+          sudo apt-get install libusb-1.0-0-dev 
           make
     - uses: ncipollo/release-action@v1
       with:
