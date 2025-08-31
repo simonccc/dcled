@@ -3,19 +3,6 @@ Copyright 2009-2014 Jeff Jahr <malakai@jeffrika.com>
 
 This is a cut down version for my own usage feel free to enjoy! 
 
-Dcled runs on linux, and perhaps other operating systesm.  To use it, you need
-to have the usb hiddev loaded- on my system that seems to be the module named
-'usbhid', and it is loaded by default.  When you plug in the message board, the
-system ought to see it and create an entry in /dev/usb/hiddev* for it.  You can
-check if the device is loaded correctly with this command:
-
-lsusb -d 1d34:0013 -v
-
-That out to output a whole lot of stuff that you probably dont care about-
-unless it outputs nothing.  If it outputs nothing, then you have a problem with
-your usb. Or maybe you have message board with a different vendor and product
-id.
-
 BUILDING IT:
 
 If you are running
@@ -94,11 +81,6 @@ Here is how I use it to monitor my game server syslog file:
 
 tail -f syslog | dcled -e -p static
 
-cpuload example 
-
-./cpuload 0.2 | ./dcled -T tach
-
-
 CREDITS:
 
-Please see original README files in the old directory
+Please see original README files in the docs directory

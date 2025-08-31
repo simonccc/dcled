@@ -1,9 +1,6 @@
 # This file is part of dcled, written on Sun Jan  4 00:18:16 PST 2009
 # Jeff Jahr <malakai@jeffrika.com> -jsj 
 
-# What goes into the archive?
-DISTFILES= dcled.c cpuload.c makefile README README-MACOS
-
 # INSTALLDIR is where the binaries get installed
 INSTALLDIR=/usr/local/bin
 FONTDIR="/usr/local/share/dcled"
@@ -22,26 +19,22 @@ LDFLAGS= -g -lm ${LIBUSB_LIBS}
 # You probaby dont need to change anything below this line...
  
 # List of the various files
-CFILES= dcled.c cpuload.c
-HFILES= 
-OFILES= dcled.o cpuload.o
+CFILES= dcled.c
+OFILES= dcled.o 
 
 # build everything
-all:	dcled cpuload
+all:	dcled 
 
 dcled: dcled.o
 	$(CC) dcled.o -o dcled $(LDFLAGS)
 
-cpuload: cpuload.o
-	$(CC) cpuload.o -o cpuload $(LDFLAGS)
-
 # rebuild the ctags
-ctags: $(HFILES) $(CFILES)
-	ctags -d -I -l c -t $(HFILES) $(CFILES)
+ctags: $(CFILES)
+	ctags -d -I -l c -t $(CFILES)
 
 # remove the object files
 clean:	
-	rm $(OFILES) dcled cpuload
+	rm $(OFILES) dcled
 
 # copy stuff into the install directory
 install:
@@ -50,20 +43,6 @@ install:
 	mkdir -p $(INSTALLDIR)
 	cp dcled $(INSTALLDIR)
 
-udev:
-	service udev restart
-
-dist:
-	mkdir ${DIST}
-	cp ${DISTFILES} ${DIST}
-	cp -r fonts ${DIST}
-	tar -cvzf ${DIST}.tgz ${DIST}
-
 # ...and now the dependencies. 
 dcled.o : dcled.c
 	$(CC) -c $(CFLAGS) dcled.c
-
-cpuload.o : cpuload.c
-	$(CC) -c $(CFLAGS) cpuload.c
-
-# Still reading?  Then the problem probably isnt with this file. ;) -jsj
