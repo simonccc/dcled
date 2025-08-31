@@ -1740,17 +1740,6 @@ int main (int argc, char **argv) {
 */
 struct ledfont *initfont1(struct ledfont *target) {
 
-	/* 
-	 Font is 7 bytes per entry, each byte is a row.  The character bitmaps are
-	 like 5 bits wide, mirrored, starting at bit zero.  Why so bizzare, you
-	 ask?  Oh god, the horror of converting from an existing font to this...
-	 ImageMagick -draw text, conversion to xbm format, tcl scripts to parse the
-	 xbm data into this c code... anyway, it was faster than drawing a font
-	 myself, although not by much.  Ulitmately, this array was built
-	 automatically from the X11 5x7 font, and it works.  That is what matters
-	 for an afternoon project.  Feel free to improve it. :)
-	*/
-
 	static char font[256][FONTY] = {
 		{ 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA },
 		{ 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA },
