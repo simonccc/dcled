@@ -1,0 +1,21 @@
+name: release
+
+on: 
+  workflow_distpatch:
+  push:
+    tags:
+    - 'release'
+
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v4
+      run: make
+    - uses: ncipollo/release-action@v1
+      with:
+        artifacts: "dcled cpuload"
+        bodyFile: "Readme.md"
