@@ -19,7 +19,10 @@ jobs:
           make
     - uses: ncipollo/release-action@v1
       with:
-        artifacts: "dcled cpuload"
+        allowUpdates: true
+        makeLatest: true
+        artifacts: "dcled"
         bodyFile: "README.md"
         tag: "ghaction_rls"
+        name: "latest"
 
